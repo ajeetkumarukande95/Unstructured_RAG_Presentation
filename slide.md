@@ -1,0 +1,160 @@
+Enhancing Quality of Retrieval Chunk By Implementing
+RAG
+
+Semi-Structured and Multi-Modal RAG
+Challenges and Key Issue in Classical RAG Approach
+Challenge - Many documents contain a mixture of content types (text, tables, images).
+•Key Issues -
+Text splitting may break up tables, corrupting data retrieval.
+Embedding tables poses challenges for semantic similarity search.
+Information from images is typically lost.
+
+Overcoming of Challenges and Issue
+By implementing Unstructured library for Document loaders- parse PDFs and extract Text, Table, Images.
+By implementing “by_title ” as best chunking strategy to chunk document as titles as natural breakpoints, preserves section boundaries and optionally page boundaries.
+By implementing “MultiVectorRetriever” as retriever to store Raw text, Table data, and Image summaries alongside their embeddings for retrieval into InMemoryStore(Document Store) and Vector Store.
+Data Extractions Strategy
+Objective - Parse and extract structured data from documents.
+Tool Used - Unstructured library to parse PDFs and extract Text, Table, Images.
+The PDF partitioning used by Unstructured will use:
+tesseract for Optical Character Recognition (OCR) for text extraction.
+poppler for PDF rendering and processing
+We use the Unstructured partition_pdf, which segments a PDF document by using a layout model.
+This layout model makes it possible to extract elements, such as tables, from pdfs.
+ Use layout model (YOLOX) to get bounding boxes (for tables) and find titles
+ Titles are any sub-section of the document.
+
+<screen shot>
+
+Implementation of Data Extraction Strategy.
+from unstructured.partition.pdf import partition_pdf
+raw_pdf_elements = partition_pdf(
+    filename="path_to_pdf",
+    extract_images_in_pdf=True,
+    infer_table_structure=True,
+)
+Key Parameters
+extract_images_in_pdf=True : Extracts embedded images.
+infer_table_structure=True: Identifies and structures tables.
+
+
+Data Chunking Strategy
+Smart Chunking with Unstructured
+Unstructured provides advanced smart chunking strategies that enhance document processing by organizing content into logical segments. This system simplifies handling complex documents by partitioning them into distinct elements, such as paragraphs and images, before chunking.
+Key Benefits
+Logical Partitioning - Documents are divided into meaningful elements, improving clarity and context.
+Uninterrupted Information Flow - Avoids mid-word splits, maintaining the integrity of text.
+Controlled Chunk Sizes - Users can set maximum and minimum limits for chunk sizes.
+Topic Preservation - Ensures distinct topics remain separate, enhancing retrieval precision.
+
+
+Data Chunking Strategy
+Chunking Strategies
+•Basic Chunking:  Combines sequential elements up to a maximum size, splitting oversized elements.
+•By Title Chunking:  Preserves section boundaries, ensuring that topics do not intermingle.
+•By Page Chunking (Serverless API):  Keeps content from different pages distinct, completing chunks at page boundaries.
+•By Similarity Chunking (Serverless API):  Groups topically similar elements when clear boundaries are not defined.
+Advantages
+•Universal Applicability - Strategies are effective across various document types without needing hardcoded separators.
+•Experimentation-Friendly - Easily test different chunk sizes and strategies to find the optimal setup for specific use cases.
+To partition data into manageable chunks while preserving context and relationships.
+Chunk by Title: Use titles as natural breakpoints.
+The by_title chunking strategy preserves section boundaries and optionally page boundaries as well.
+Detect section headings. A Title element is considered to start a new section. When a Title element is encountered, the prior chunk is closed and a new chunk started, even if the Title element would fit in the prior chunk.
+Respect page boundaries. Page boundaries can optionally also be respected using the multipage_sections argument. This defaults to True meaning that a page break does not start a new chunk. Setting this to False will separate elements that occur on different pages into distinct chunks.
+
+Combine small sections. In certain documents, partitioning may identify a list-item or other short paragraph as a Title element even though it does not serve as a section heading. This can produce chunks substantially smaller than desired. This behavior can be mitigated using the combine_text_under_n_char argument. This defaults to the same value as max_characters such that sequential small sections are combined to maximally fill the chunking window. Setting this to 0 will disable section combining.
+Character Limits: Aim for chunks between 2000 and 4000 characters, optimizing the structure without losing context.
+By Title: Group content under section titles.
+Advantages: This strategy minimizes information loss and ensures that related data remains accessible, leading to better retrieval results.
+
+
+Implementation Chunking Strategy
+from unstructured.partition.pdf import partition_pdf
+raw_pdf_elements = partition_pdf(
+    chunking_strategy="by_title",
+    max_characters=4000,
+    new_after_n_chars=3800,
+    combine_text_under_n_chars=2000,
+)
+
+
+Multi-Vector Retriever
+
+diagram
+
+Multi-Vector Retriever
+
+This The Multi-Vector Retriever can handle semi-structured and multi-modal data, making it versatile for applications involving diverse data formats, such as PDFs containing both text and tables, or documents with embedded images.
+Implement a Multi-Vector Retriever to store
+Raw text, Table data, and Image data into document store and it’s summaries alongside their embeddings for retrieval into vector store.
+Use LLM model to generate summaries of both text and table data, which will be stored in a vector store.
+The summaries are used to improve the quality of retrieval.
+The raw tables are passed to the LLM, providing the full table context for the LLM to generate the answer.
+
+Multi-Vector Retriever Component
+
+Enhance retrieval by allowing the embedding of multiple representations of a document.
+•Components
+InMemoryStore: Stores raw text and table elements for full context.
+Vector Store: Holds embedded summaries for fast and efficient querying.
+•Strategies
+Smaller Chunks: Documents are divided into smaller, more manageable pieces for focused retrieval (ParentDocumentRetriever).
+Summaries: Each document's summary is embedded to facilitate quicker, more relevant searches.
+Hypothetical Questions: Generating questions relevant to each document enhances query specificity and improves retrieval quality.
+
+Indexing Strategy
+Use a dual-indexing approach:
+Vector Store: Stores embedded summaries for quick access.
+Document Store: Retains raw data for in-depth context.
+This strategy allows for seamless access to both summarized and detailed content, ensuring comprehensive answers.
+Holistic Retrieval Approach
+Combine raw data, summaries, and embedded content to provide the best context for generating answers.
+Storing both raw and summarized content ensures that LLMs have access to the full spectrum of data, improving the richness of the output.
+1.Document Partitioning: Tools like Unstructured are used to extract and partition different elements (text, tables, images) from documents.
+2.Vector Store Creation: Using vector databases like Chroma to store embeddings and an in-memory document store to keep the original documents.
+3.Retrieval Setup: Employing Lang Chain's Multi-Vector Retriever, which integrates with various embedding models and document loaders to enable effective querying.
+
+from langchain.retrievers.multi_vector import MultiVectorRetriever
+# The storage layer for the parent documents
+store = InMemoryByteStore()
+id_key = "doc_id"
+# The retriever (empty to start)
+retriever = MultiVectorRetriever(vectorstore=vectorstore, byte_store=store, id_key=id_key,)
+This line defines a key doc_id that will be used in the metadata of both the original chunks and their summaries to link them together.
+This is the key used to join or link the data between the vectorstore and the docstore. Essentially, it's the unique identifier for each document across both stores.
+
+
+Different Retrievers
+Idea
+Example
+Sources
+Base case RAG
+Top K retrieval on embedded document chunks, return doc chunks for LLM context window
+LangChain vectorstores, embedding models
+Summary embedding
+Top K retrieval on embedded document summaries, but return full doc for LLM context window
+LangChain Multi Vector Retriever
+Windowing
+Top K retrieval on embedded chunks or sentences, but return expanded window or full doc
+LangChain Parent Document Retriever
+Metadata filtering
+Top K retrieval with chunks filtered by metadata
+Self-query retriever
+Fine-tune RAG embeddings
+Fine-tune embedding model on your data
+LangChain fine-tuning guide
+2-stage RAG
+First stage keyword search followed by second stage semantic Top K retrieval
+Cohere re-ran
+
+References
+https://docs.unstructured.io/api-reference/api-services/chunking
+https://unstructured.io/blog/chunking-for-rag-best-practices
+https://github.com/GoogleCloudPlatform/generative-ai/blob/main/gemini/use-cases/retrieval-augmented-generation/multimodal_rag_langchain.ipynb
+https://www.kaggle.com/code/marcinrutecki/rag-multi-vector-retriever
+https://python.langchain.com/docs/how_to/multi_vector/
+https://medium.com/@abatutin/is-the-langchain-multi-vector-retriever-worth-it-0c8565e8a8fd
+https://genai.acloudfan.com/130.rag/ex-5-multi-vector-retriever/
+https://blog.langchain.dev/semi-structured-multi-modal-rag/
+https://huggingface.co/learn/cookbook/en/rag_with_unstructured_data
